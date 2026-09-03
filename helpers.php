@@ -1,0 +1,196 @@
+<?php
+declare(strict_types=1);
+
+// ============================================================
+// Вспомогательные функции чата: БД, авторизация, пользователи.
+// Этот файл не нужно менять, кроме как для интеграции авторизации
+// (см. chat_current_user_id и chat_user_info ниже).
+// ============================================================
+
+function chat_config(): array
+{
+    static $cfg = null;
+    if ($cfg === null) {
+        $cfg = require __DIR__ . '/config.php';
+        date_default_timezone_set($cfg['timezone'] ?? 'Europe/Kyiv');
+    }
+    return $cfg;
+}
+
+/** Единое PDO-подключение. Часовой пояс MySQL синхронизируется с PHP. */
+function chat_db(): PDO
+{
+    static $pdo = null;
+    if ($pdo === null) {
+        $cfg = chat_config()['db'];
+        $dsn = sprintf('mysql:host=%s;port=%d;dbname=%s;charset=%s',
+            $cfg['host'], $cfg['port'], $cfg['name'], $cfg['charset']);
+        $pdo = new PDO($dsn, $cfg['user'], $cfg['pass'], [
+            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            PDO::ATTR_EMULATE_PREPARES   => false,
+        ]);
+        // Синхронизируем MySQL с PHP-таймзоной (например, «+03:00» для Киева)
+        $offset = (new DateTimeImmutable())->format('P');
+        $pdo->exec("SET time_zone = '" . $offset . "'");
+    }
+    return $pdo;
+}
+
+/**
+ * >>> ГЛАВНАЯ ТОЧКА ИНТЕГРАЦИИ <<<
+ * Должна вернуть ID текущего пользователя вашего сайта или null.
+ *
+ * По умолчанию (config: demo_auth = true) работает тестовый вход: /chat-page.php?act_as=1
+ *
+ * Когда на сайте готова своя авторизация:
+ *   1) в config.php поставьте 'demo_auth' => false
+ *   2) раскомментируйте строку ниже, подставив имя вашей сессионной переменной.
+ */
+function chat_current_user_id(): ?int
+{
+    $cfg = chat_config();
+    if (!empty($cfg['demo_auth'])) {
+        if (session_status() !== PHP_SESSION_ACTIVE) {
+            session_start();
+        }
+        if (isset($_GET['act_as'])) {
+            $_SESSION['chat_act_as'] = max(1, (int)$_GET['act_as']);
+        }
+        return isset($_SESSION['chat_act_as']) ? (int)$_SESSION['chat_act_as'] : null;
+    }
+
+    // ИНТЕГРАЦИЯ С ВАШИМ САЙТОМ — раскомментируйте и подставьте своё:
+    // if (session_status() !== PHP_SESSION_ACTIVE) { session_start(); }
+    // return isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : null;
+
+    return null; // по умолчанию: не авторизован
+}
+
+/**
+ * Информация о пользователях: [id => ['id'=>.., 'name'=>..]]
+ * По умолчанию берётся таблица из config.php. На продакшене проще всего
+ * указать вашу таблицу в config, либо перепишите этот запрос вручную.
+ *
+ * @param int[] $ids
+ * @return array<int, array{id:int, name:string}>
+ */
+function chat_users_info(array $ids): array
+{
+    $ids = array_values(array_unique(array_map('intval', $ids)));
+    if (!$ids) {
+        return [];
+    }
+    $cfg = chat_config();
+    $table = $cfg['users_table'];
+    $col  = $cfg['users_name_col'];
+    $in   = implode(',', array_fill(0, count($ids), '?'));
+    $st   = chat_db()->prepare("SELECT id, `{$col}` AS name FROM `{$table}` WHERE id IN ($in)");
+    $st->execute($ids);
+    $out = [];
+    foreach ($st->fetchAll() as $row) {
+        $out[(int)$row['id']] = ['id' => (int)$row['id'], 'name' => (string)$row['name']];
+    }
+    return $out;
+}
+
+/** Обновить «был(а) в сети» для пользователя. */
+function chat_touch_presence(int $userId): void
+{
+    chat_db()->prepare(
+        'INSERT INTO chat_presence (user_id, last_seen) VALUES (:u, NOW())
+         ON DUPLICATE KEY UPDATE last_seen = NOW()'
+    )->execute([':u' => $userId]);
+}
+
+/** Онлайн-карта для списка id: [id => bool]. */
+function chat_online_map(array $ids): array
+{
+    $ids = array_values(array_unique(array_map('intval', $ids)));
+    $map = array_fill_keys($ids, false);
+    if (!$ids) {
+        return $map;
+    }
+    $limit = (int)(chat_config()['online_seconds'] ?? 60);
+    $in = implode(',', array_fill(0, count($ids), '?'));
+    $st = chat_db()->prepare(
+        "SELECT user_id FROM chat_presence
+          WHERE user_id IN ($in) AND last_seen >= DATE_SUB(NOW(), INTERVAL $limit SECOND)"
+    );
+    $st->execute($ids);
+    foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $uid) {
+        $map[(int)$uid] = true;
+    }
+    return $map;
+}
+
+/** JSON-ответ с правильными заголовками. */
+function json_out(array $data, int $code = 200): void
+{
+    http_response_code($code);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode($data, JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+/** Проверка: пользователь — участник диалога. */
+function chat_is_participant(int $threadId, int $userId): bool
+{
+    $st = chat_db()->prepare(
+        'SELECT 1 FROM chat_participants WHERE thread_id = :t AND user_id = :u LIMIT 1'
+    );
+    $st->execute([':t' => $threadId, ':u' => $userId]);
+    return (bool)$st->fetchColumn();
+}
+
+/** Строка сообщения в едином формате для API. */
+function chat_message_row(array $m): array
+{
+    return [
+        'id'         => (int)$m['id'],
+        'thread_id'  => (int)$m['thread_id'],
+        'sender_id'  => (int)$m['sender_id'],
+        'body'       => (string)($m['body'] ?? ''),
+        'has_file'   => !empty($m['has_file']),
+        'file_name'  => $m['file_name'] !== null ? (string)$m['file_name'] : null,
+        'file_size'  => $m['file_size'] !== null ? (int)$m['file_size'] : null,
+        'is_image'   => !empty($m['is_image']),
+        'ts'         => (int)$m['ts'],
+    ];
+}
+
+/** Сохранение вложения. Возвращает [relPath, fileName, size, isImage]. */
+function chat_save_upload(array $file): array
+{
+    $cfg = chat_config();
+    if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        throw new RuntimeException('Ошибка загрузки файла');
+    }
+    $maxBytes = ((int)$cfg['max_file_mb']) * 1024 * 1024;
+    if ($file['size'] > $maxBytes) {
+        throw new RuntimeException('Файл больше ' . $cfg['max_file_mb'] . ' МБ');
+    }
+    if (!is_uploaded_file($file['tmp_name'])) {
+        throw new RuntimeException('Некорректная загрузка');
+    }
+    $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+    if (!in_array($ext, $cfg['allowed_ext'], true)) {
+        throw new RuntimeException('Тип файла не разрешён: .' . $ext);
+    }
+    $rel = date('Y/m');
+    $dir = rtrim($cfg['uploads_dir'], '/') . '/' . $rel;
+    if (!is_dir($dir) && !mkdir($dir, 0755, true)) {
+        throw new RuntimeException('Не удалось создать каталог для файлов');
+    }
+    $name = date('Ymd_His') . '_' . bin2hex(random_bytes(6)) . '.' . $ext;
+    if (!move_uploaded_file($file['tmp_name'], $dir . '/' . $name)) {
+        throw new RuntimeException('Не удалось сохранить файл');
+    }
+    $images = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+    return [
+        $rel . '/' . $name,
+        mb_substr((string)$file['name'], 0, 200),
+        (int)$file['size'],
+        in_array($ext, $images, true) ? 1 : 0,
+    ];
+}

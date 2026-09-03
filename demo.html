@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Демо: чат заказчик ↔ исполнитель в стиле Telegram</title>
+<style>
+/* ======== строка переключения ролей (только для демо) ======== */
+html, body { margin: 0; height: 100%; }
+body {
+  display: flex; flex-direction: column;
+  background: linear-gradient(160deg, #8fb8d8, #b9d0e2 60%, #dbe6f0);
+  font: 15px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+}
+.demo-bar {
+  flex: none;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 16px;
+  background: #17212b; color: #c9d6e2;
+}
+.demo-bar b { color: #fff; font-size: 14px; }
+.role-btn {
+  border: 1px solid #3a4a5a; background: none; color: #c9d6e2;
+  border-radius: 16px; padding: 5px 14px; font: inherit; font-size: 13.5px;
+  cursor: pointer;
+}
+.role-btn.active { background: #3390ec; border-color: #3390ec; color: #fff; font-weight: 600; }
+.demo-note { margin-left: auto; font-size: 12.5px; color: #8fa3b5; }
+#chat { flex: 1; min-height: 0; padding: 14px; }
+.toast {
+  position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+  background: rgba(23,33,43,.92); color: #fff;
+  padding: 9px 18px; border-radius: 10px; font-size: 13.5px;
+  opacity: 0; pointer-events: none; transition: opacity .25s;
+}
+.toast.show { opacity: 1; }
+
+/* ======== сам чат (те же стили, что в chat/assets/chat.css) ======== */
+.tg {
+  --tg-blue: #3390ec;
+  --tg-blue-soft: rgba(51, 144, 236, 0.12);
+  --tg-out: #eeffd8;
+  --tg-out-check: #4fae4e;
+  --tg-side-bg: #ffffff;
+  --tg-chat-bg-1: #dbe6f0;
+  --tg-chat-bg-2: #edf2f7;
+  --tg-text: #17212b;
+  --tg-text-2: #707579;
+  --tg-line: #e7e8ec;
+  --tg-radius: 14px;
+  display: flex;
+  width: 100%;
+  height: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+  background: var(--tg-side-bg);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 2px 20px rgba(23, 33, 43, 0.12);
+  font: 15px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  color: var(--tg-text);
+  text-align: left;
+}
+.tg * { box-sizing: border-box; }
+.tg-side { width: 330px; flex: 0 0 330px; display: flex; flex-direction: column; border-right: 1px solid var(--tg-line); background: var(--tg-side-bg); }
+.tg-side-head { padding: 14px 18px; font-size: 17px; font-weight: 700; border-bottom: 1px solid var(--tg-line); display: flex; align-items: center; gap: 8px; min-height: 56px; }
+.tg-side-head .tg-dot { width: 8px; height: 8px; border-radius: 50%; background: #4ddb64; box-shadow: 0 0 0 3px rgba(77,219,100,.25); }
+.tg-list { flex: 1; overflow-y: auto; padding: 6px 8px; }
+.tg-item { display: flex; gap: 12px; padding: 9px 10px; border-radius: 12px; cursor: pointer; align-items: center; user-select: none; }
+.tg-item:hover { background: #f4f4f5; }
+.tg-item.active { background: var(--tg-blue-soft); }
+.tg-ava { width: 54px; height: 54px; flex: 0 0 54px; border-radius: 50%; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 19px; font-weight: 600; letter-spacing: .5px; position: relative; }
+.tg-ava.sm { width: 42px; height: 42px; flex-basis: 42px; font-size: 16px; }
+.tg-ava .tg-online { position: absolute; right: 1px; bottom: 1px; width: 13px; height: 13px; border-radius: 50%; background: #4ddb64; border: 2.5px solid #fff; display: none; }
+.tg-ava.is-online .tg-online { display: block; }
+.tg-item-body { flex: 1; min-width: 0; }
+.tg-row1 { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.tg-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tg-time { color: var(--tg-text-2); font-size: 12px; flex: none; }
+.tg-row1 .tg-time.unread { color: var(--tg-blue); font-weight: 700; }
+.tg-row2 { display: flex; justify-content: space-between; gap: 8px; margin-top: 2px; }
+.tg-prev { color: var(--tg-text-2); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tg-prev .you { color: #000; }
+.tg-prev.typing { color: var(--tg-blue); font-style: italic; }
+.tg-badge { flex: none; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px; background: var(--tg-blue); color: #fff; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
+.tg-subject { color: var(--tg-blue); font-size: 12.5px; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tg-main { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; background: var(--tg-chat-bg-2); }
+.tg-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--tg-text-2); font-size: 15px; }
+.tg-chat { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.tg-chat[hidden] { display: none; }
+.tg-head { display: flex; align-items: center; gap: 12px; padding: 8px 14px; min-height: 60px; background: #fff; border-bottom: 1px solid var(--tg-line); z-index: 2; }
+.tg-back { display: none; border: 0; background: none; font-size: 22px; color: var(--tg-text-2); cursor: pointer; padding: 4px 6px; margin-left: -6px; }
+.tg-head-body { min-width: 0; }
+.tg-head-name { font-weight: 700; font-size: 15.5px; }
+.tg-head-status { color: var(--tg-text-2); font-size: 13px; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tg-head-status.typing, .tg-head-status.online { color: var(--tg-blue); }
+.tg-head-status.typing { font-style: italic; }
+.tg-msgs {
+  flex: 1; min-height: 0; overflow: hidden; position: relative;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='0.35' stroke-width='2'%3E%3Ccircle cx='24' cy='30' r='7'/%3E%3Cpath d='M95 18l8 8m0-8l-8 8'/%3E%3Crect x='60' y='55' width='14' height='14' rx='4'/%3E%3Ccircle cx='115' cy='95' r='4'/%3E%3Cpath d='M20 90q6-10 12 0t12 0'/%3E%3Ccircle cx='70' cy='115' r='5'/%3E%3Cpath d='M100 125l6 6m0-6l-6 6'/%3E%3Cpath d='M35 125h12'/%3E%3C/g%3E%3C/svg%3E"),
+    linear-gradient(160deg, var(--tg-chat-bg-1), var(--tg-chat-bg-2));
+}
+.tg-scroll { position: absolute; inset: 0; overflow-y: auto; padding: 14px 6% 10px; }
+.tg-day { text-align: center; margin: 10px 0 6px; }
+.tg-day span { background: rgba(0,0,0,.18); color: #fff; font-size: 13px; font-weight: 600; padding: 3px 12px; border-radius: 13px; }
+.tg-m { display: flex; margin: 2px 0; }
+.tg-m.out { justify-content: flex-end; }
+.tg-bubble { position: relative; max-width: min(480px, 82%); border-radius: var(--tg-radius); padding: 7px 10px 7px 11px; box-shadow: 0 1px 1px rgba(23,33,43,.12); word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap; }
+.tg-m.in  .tg-bubble { background: #fff; border-bottom-left-radius: 6px; }
+.tg-m.out .tg-bubble { background: var(--tg-out); border-bottom-right-radius: 6px; }
+.tg-text { font-size: 15px; }
+.tg-meta { float: right; margin: 8px -2px -4px 8px; color: var(--tg-text-2); font-size: 12px; line-height: 16px; display: inline-flex; align-items: center; gap: 3px; user-select: none; }
+.tg-m.out .tg-meta { color: #58b158; }
+.tg-checks { font-size: 13px; letter-spacing: -3px; }
+.tg-checks.single { letter-spacing: 0; margin-right: -3px; }
+.tg-m.img .tg-bubble { padding: 3px; overflow: hidden; }
+.tg-m.img img { display: block; max-width: 100%; width: auto; max-height: 340px; border-radius: 12px; }
+.tg-m.img .tg-meta { position: absolute; right: 8px; bottom: 8px; float: none; margin: 0; background: rgba(0,0,0,.5); color: #fff !important; padding: 2px 9px; border-radius: 11px; }
+.tg-m.img.has-text .tg-meta { position: static; float: right; background: none; color: #58b158 !important; padding: 0 4px 2px 0; }
+.tg-file { display: flex; gap: 10px; align-items: center; padding: 4px 2px 6px; }
+.tg-file-ico { width: 44px; height: 44px; flex: none; border-radius: 50%; background: var(--tg-blue); color: #fff; display: flex; align-items: center; justify-content: center; }
+.tg-file-name { font-weight: 600; font-size: 14.5px; color: var(--tg-blue); text-decoration: none; }
+.tg-file-size { color: var(--tg-text-2); font-size: 13px; margin-top: 1px; }
+.tg-composer { display: flex; align-items: flex-end; gap: 8px; padding: 9px 12px; background: #fff; border-top: 1px solid var(--tg-line); }
+.tg-composer button { border: 0; background: none; cursor: pointer; padding: 0; }
+.tg-attach { width: 42px; height: 42px; border-radius: 50%; color: var(--tg-text-2); display: flex; align-items: center; justify-content: center; font-size: 22px; flex: none; }
+.tg-attach:hover { background: #f1f3f5; }
+.tg-input-wrap { flex: 1; background: #f1f3f5; border-radius: 20px; padding: 9px 16px; }
+.tg-input { width: 100%; border: 0; background: none; outline: none; resize: none; font: inherit; line-height: 1.35; max-height: 132px; display: block; color: var(--tg-text); }
+.tg-send { width: 46px; height: 46px; flex: none; border-radius: 50%; background: var(--tg-blue); color: #fff; display: flex; align-items: center; justify-content: center; transition: transform .1s, background .15s; }
+.tg-send:hover { background: #2b7fd4; }
+.tg-send:active { transform: scale(.92); }
+@media (max-width: 860px) {
+  .tg { border-radius: 0; }
+  .tg-side { width: 100%; flex-basis: 100%; }
+  .tg .tg-main { display: none; }
+  .tg.open .tg-side { display: none; }
+  .tg.open .tg-main { display: flex; }
+  .tg-back { display: block; }
+  .tg-scroll { padding: 12px 10px 8px; }
+  .tg-bubble { max-width: 88%; }
+}
+</style>
+</head>
+<body>
+
+<div class="demo-bar">
+  <b>Демо чата — вы вошли как:</b>
+  <button class="role-btn active" data-role="1">Анна · заказчик</button>
+  <button class="role-btn" data-role="2">Игорь · исполнитель</button>
+  <span class="demo-note">Отправьте сообщение, затем переключите роль — увидите галочки ✓✓ и «печатает…»</span>
+</div>
+
+<div id="chat"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ================= мок-данные ================= */
+  var users = { 1: { name: 'Анна Петренко' }, 2: { name: 'Игорь Ковалёв' }, 3: { name: 'Максим Белый' } };
+
+  function at(hoursAgo, h, m) {
+    var d = new Date();
+    d.setHours(h, m, 0, 0);
+    if (hoursAgo) d.setDate(d.getDate() - hoursAgo);
+    return Math.floor(d.getTime() / 1000);
+  }
+  var now = Math.floor(Date.now() / 1000);
+
+  // «фото» эскиза — data URI, внешние ресурсы не нужны
+  var IMG = 'data:image/svg+xml,' + encodeURIComponent(
+    "<svg xmlns='http://www.w3.org/2000/svg' width='480' height='300'>" +
+    "<defs><linearGradient id='s' x1='0' y1='0' x2='0' y2='1'>" +
+    "<stop offset='0' stop-color='#ffd98a'/><stop offset='.55' stop-color='#9fd0f0'/><stop offset='1' stop-color='#dff1fb'/></linearGradient></defs>" +
+    "<rect width='480' height='300' fill='url(#s)'/>" +
+    "<circle cx='395' cy='62' r='26' fill='#ffe9b0'/>" +
+    "<path d='M0 300 L110 170 L180 240 L260 150 L360 300 Z' fill='#4a7ba6' opacity='.85'/>" +
+    "<path d='M0 300 L110 170 L180 240 L260 150 L360 300 Z' fill='none' stroke='#fff' stroke-opacity='.35' stroke-width='3'/>" +
+    "<path d='M120 300 L230 190 L340 300 Z' fill='#6b9ec9' opacity='.8'/>" +
+    "<text x='20' y='36' font-family='Segoe UI, Arial' font-size='19' fill='#17212b' opacity='.75'>эскиз-логотипа-v1.png</text>" +
+    "</svg>");
+
+  var threads = [
+    {
+      id: 1, subject: 'Логотип для сайта', users: [1, 2],
+      msgs: [
+        { sender: 2, ts: at(1, 10, 12), body: 'Добрый день! Увидел ваш заказ на логотип. Готов взяться, портфолио — в профиле.' },
+        { sender: 1, ts: at(1, 10, 15), body: 'Здравствуйте! Какие сроки на первые варианты?' },
+        { sender: 2, ts: at(1, 10, 16), body: 'Первые варианты — 2 дня, с учётом правок — до четырёх.' },
+        { sender: 2, ts: now - 3 * 3600, body: 'Вот первый эскиз, жду впечатлений :)', img: IMG, fname: 'эскиз-логотипа-v1.png' },
+        { sender: 1, ts: now - 40 * 60, body: 'Мне нравится! Давайте развивать это направление.\nПодробные замечания напишу сегодня вечером.' }
+      ]
+    },
+    {
+      id: 2, subject: 'Вёрстка лендинга', users: [1, 3],
+      msgs: [
+        { sender: 3, ts: at(1, 18, 40), body: 'Здравствуйте! Могу сделать вёрстку вашего лендинга за неделю, адаптив включительно.' },
+        { sender: 3, ts: now - 25 * 60, body: 'Отправил вам примеры своих работ — посмотрите профиль.' },
+        { sender: 3, ts: now - 24 * 60, body: 'doc', fname: 'Примеры-работ-2026.pdf', fsize: 2411724 }
+      ]
+    }
+  ];
+
+  // кто что прочитал: lastRead[userId][threadId] = ts
+  var lastRead = {
+    1: { 1: now - 2 * 3600, 2: now - 5 * 3600 },   // Анна: в т2 два непрочитанных от Максима
+    2: { 1: now - 30 * 60 },                        // Игорь: всё прочитал ✓✓
+    3: { 2: now }
+  };
+  var online = { 1: true, 2: true, 3: false };      // Максим оффлайн — «был(а) недавно»
+  var typingBy = {};   // threadId -> userId, кто «печатает»
+  var role = 1;        // текущий пользователь демо
+  var active = 1;      // открытый диалог
+  var typingTimer = null;
+
+  var REPLIES = [
+    'Принял, приступаю!',
+    'Отлично, тогда сегодня к вечеру пришлю обновление.',
+    'Хорошо, учту в следующей версии 🙂',
+    'Согласен, так будет лучше.'
+  ];
+  var replyIdx = 0;
+
+  /* ================= утилиты ================= */
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function hueOf(seed) { var h = 0; var s = String(seed); for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return h % 360; }
+  function avatarStyle(seed) { var h = hueOf(seed); return 'background:linear-gradient(135deg,hsl(' + h + ',62%,55%),hsl(' + ((h + 40) % 360) + ',68%,42%))'; }
+  function initials(name) { var p = name.split(' '); return (p[0][0] + (p[1] ? p[1][0] : '')).toUpperCase(); }
+  var MONTHS = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+  function sameDay(a, b) { return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate(); }
+  function fmtTime(ts) { var d = new Date(ts * 1000); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
+  function fmtDay(ts) {
+    var d = new Date(ts * 1000), n = new Date(), y = new Date(Date.now() - 864e5);
+    if (sameDay(d, n)) return 'Сегодня';
+    if (sameDay(d, y)) return 'Вчера';
+    return d.getDate() + ' ' + MONTHS[d.getMonth()] + (d.getFullYear() !== n.getFullYear() ? ' ' + d.getFullYear() : '');
+  }
+  function fmtListTime(ts) {
+    var d = new Date(ts * 1000), n = new Date(), y = new Date(Date.now() - 864e5);
+    if (sameDay(d, n)) return fmtTime(ts);
+    if (sameDay(d, y)) return 'Вчера';
+    return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+  }
+  function fmtSize(b) { return b < 1048576 ? (b / 1024).toFixed(1) + ' КБ' : (b / 1048576).toFixed(1) + ' МБ'; }
+  function otherOf(t) { return t.users[0] === role ? t.users[1] : t.users[0]; }
+  function myThreads() { return threads.filter(function (t) { return t.users.indexOf(role) >= 0; }); }
+  function unreadOf(t) {
+    var lr = (lastRead[role] && lastRead[role][t.id]) || 0;
+    return t.msgs.filter(function (m) { return m.sender !== role && m.ts > lr; }).length;
+  }
+  function toast(msg) {
+    var el = document.getElementById('toast');
+    el.textContent = msg; el.classList.add('show');
+    clearTimeout(el._t); el._t = setTimeout(function () { el.classList.remove('show'); }, 2600);
+  }
+
+  /* ================= рендер ================= */
+  var root = document.getElementById('chat');
+  root.innerHTML =
+      '<aside class="tg-side"><div class="tg-side-head"><span class="tg-dot"></span>Сообщения</div><div class="tg-list" id="d-list"></div></aside>'
+    + '<section class="tg-main">'
+    + '  <div class="tg-empty" id="d-empty" hidden>Выберите чат</div>'
+    + '  <div class="tg-chat" id="d-chat">'
+    + '    <header class="tg-head"><button class="tg-back" id="d-back">&#8592;</button>'
+    + '      <div class="tg-ava sm" id="d-ava"><span id="d-ava-txt"></span><i class="tg-online"></i></div>'
+    + '      <div class="tg-head-body"><div class="tg-head-name" id="d-name"></div><div class="tg-head-status" id="d-status"></div></div>'
+    + '    </header>'
+    + '    <div class="tg-msgs"><div class="tg-scroll" id="d-scroll"></div></div>'
+    + '    <footer class="tg-composer">'
+    + '      <button class="tg-attach" id="d-attach" title="Прикрепить файл">&#128206;</button>'
+    + '      <div class="tg-input-wrap"><textarea class="tg-input" id="d-input" placeholder="Сообщение…" rows="1"></textarea></div>'
+    + '      <button class="tg-send" id="d-send" title="Отправить"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>'
+    + '    </footer>'
+    + '  </div>'
+    + '</section>';
+
+  function $ (id) { return document.getElementById(id); }
+
+  function renderList() {
+    var html = '';
+    myThreads().forEach(function (t) {
+      var oid = otherOf(t), name = users[oid].name;
+      var last = t.msgs[t.msgs.length - 1];
+      var prev, time = '';
+      if (typingBy[t.id] && typingBy[t.id] !== role) {
+        prev = '<span class="tg-prev typing">печатает…</span>';
+      } else if (last) {
+        var txt = last.fname ? (last.img ? '🖼 Фото' : '📎 ' + esc(last.fname)) : esc(last.body);
+        if (last.sender === role) txt = '<span class="you">Вы:</span> ' + txt;
+        prev = '<span class="tg-prev">' + txt + '</span>';
+        time = fmtListTime(last.ts);
+      } else prev = '<span class="tg-prev">Нет сообщений</span>';
+      var un = unreadOf(t);
+      var badge = un ? '<span class="tg-badge">' + un + '</span>' : '';
+      html += '<div class="tg-item' + (t.id === active ? ' active' : '') + '" data-id="' + t.id + '">'
+        + '<div class="tg-ava' + (online[oid] ? ' is-online' : '') + '" style="' + avatarStyle(oid) + '">' + esc(initials(name)) + '<i class="tg-online"></i></div>'
+        + '<div class="tg-item-body"><div class="tg-row1"><span class="tg-name">' + esc(name) + '</span><span class="tg-time' + (un ? ' unread' : '') + '">' + time + '</span></div>'
+        + '<div class="tg-row2">' + prev + badge + '</div>'
+        + (t.subject ? '<div class="tg-subject">' + esc(t.subject) + '</div>' : '') + '</div></div>';
+    });
+    $('d-list').innerHTML = html;
+    Array.prototype.forEach.call($('d-list').querySelectorAll('.tg-item'), function (el) {
+      el.onclick = function () { openThread(parseInt(el.dataset.id, 10)); };
+    });
+  }
+
+  function renderChat() {
+    var t = threads.filter(function (x) { return x.id === active; })[0];
+    if (!t || t.users.indexOf(role) < 0) {
+      $('d-chat').hidden = true; $('d-empty').hidden = false;
+      root.classList.remove('open');
+      return;
+    }
+    $('d-chat').hidden = false; $('d-empty').hidden = true;
+    root.classList.add('open');
+
+    var oid = otherOf(t), name = users[oid].name;
+    var stEl = $('d-status');
+    var st = (typingBy[t.id] === oid) ? 'печатает…' : (online[oid] ? 'в сети' : 'был(а) недавно');
+    $('d-ava').style.cssText = avatarStyle(oid);
+    $('d-ava').classList.toggle('is-online', !!online[oid]);
+    $('d-ava-txt').textContent = initials(name);
+    $('d-name').textContent = name;
+    stEl.textContent = (t.subject ? t.subject + ' · ' : '') + st;
+    stEl.className = 'tg-head-status' + (typingBy[t.id] === oid ? ' typing' : (online[oid] ? ' online' : ''));
+
+    var otherRead = (lastRead[oid] && lastRead[oid][t.id]) || 0;
+    var html = '', lastDay = '';
+    t.msgs.forEach(function (m) {
+      var day = fmtDay(m.ts);
+      if (day !== lastDay) { html += '<div class="tg-day"><span>' + esc(day) + '</span></div>'; lastDay = day; }
+      var mine = m.sender === role, cls = 'tg-m ' + (mine ? 'out' : 'in'), inner = '';
+      if (m.img) { cls += ' img' + (m.body ? ' has-text' : ''); inner += '<img src="' + m.img + '" alt="">'; }
+      else if (m.fname) {
+        inner += '<div class="tg-file"><div class="tg-file-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M5 2a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8l-6-6H5zm8 1.5L19.5 10H13V3.5zM7 12h10v2H7v-2zm0 4h7v2H7v-2z"/></svg></div>'
+          + '<div><span class="tg-file-name">' + esc(m.fname) + '</span><div class="tg-file-size">' + fmtSize(m.fsize) + '</div></div></div>';
+      }
+      if (m.body) inner += '<div class="tg-text">' + esc(m.body) + '</div>';
+      var checks = mine
+        ? (otherRead >= m.ts ? '<span class="tg-checks" title="Прочитано">&#10003;&#10003;</span>'
+                             : '<span class="tg-checks single" title="Отправлено">&#10003;</span>')
+        : '';
+      inner += '<span class="tg-meta">' + fmtTime(m.ts) + checks + '</span>';
+      html += '<div class="' + cls.trim() + '"><div class="tg-bubble">' + inner + '</div></div>';
+    });
+    var sc = $('d-scroll');
+    var pinned = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 120;
+    sc.innerHTML = html;
+    if (pinned) sc.scrollTop = sc.scrollHeight;
+  }
+
+  function render() { renderList(); renderChat(); }
+
+  /* ================= действия ================= */
+  function openThread(id) {
+    active = id;
+    var t = threads.filter(function (x) { return x.id === id; })[0];
+    if (t && (lastRead[role] = lastRead[role] || {})) lastRead[role][id] = Math.max(lastRead[role][id] || 0, nowTs());
+    render();
+    $('d-input').focus();
+  }
+
+  function nowTs() { return Math.floor(Date.now() / 1000); }
+
+  function send() {
+    var inp = $('d-input'), text = inp.value.trim();
+    if (!text || !active) return;
+    var t = threads.filter(function (x) { return x.id === active; })[0];
+    if (!t) return;
+    t.msgs.push({ sender: role, ts: nowTs(), body: text });
+    inp.value = ''; inp.style.height = 'auto';
+    typingBy[active] = null;
+    render();
+
+    // собеседник «прочитает» и ответит — чтобы показать ✓✓ и «печатает…»
+    var tid = active, oid = otherOf(t), sender = role;
+    setTimeout(function () {
+      lastRead[oid] = lastRead[oid] || {};
+      lastRead[oid][tid] = nowTs();          // ✓✓ у вашего сообщения
+      render();
+    }, 1200);
+    setTimeout(function () {
+      typingBy[tid] = oid;                    // «печатает…» в шапке и списке
+      render();
+    }, 2000);
+    setTimeout(function () {
+      var tt = threads.filter(function (x) { return x.id === tid; })[0];
+      tt.msgs.push({ sender: oid, ts: nowTs(), body: REPLIES[replyIdx++ % REPLIES.length] });
+      typingBy[tid] = null;
+      lastRead[sender] = lastRead[sender] || {};
+      lastRead[sender][tid] = 0;              // новое входящее не прочитано, пока чат не открыт
+      if (active === tid && role === sender) lastRead[sender][tid] = nowTs(); // чат открыт — прочитано
+      render();
+    }, 4200);
+  }
+
+  /* ================= события ================= */
+  Array.prototype.forEach.call(document.querySelectorAll('.role-btn'), function (btn) {
+    btn.onclick = function () {
+      role = parseInt(btn.dataset.role, 10);
+      Array.prototype.forEach.call(document.querySelectorAll('.role-btn'), function (b) { b.classList.toggle('active', b === btn); });
+      var t = threads.filter(function (x) { return x.id === active; })[0];
+      if (t && t.users.indexOf(role) < 0) active = myThreads().length ? myThreads()[0].id : null;
+      render();
+    };
+  });
+
+  $('d-send').onclick = send;
+  $('d-back').onclick = function () { active = null; render(); };
+  $('d-attach').onclick = function () { toast('В демо вложения не отправляются — примеры: эскиз и PDF есть в диалогах'); };
+  $('d-input').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+  });
+  $('d-input').addEventListener('input', function () {
+    var t = this;
+    t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 132) + 'px';
+    if (active) {
+      typingBy[active] = role; // вы «печатаете» — видно после переключения роли
+      clearTimeout(typingTimer);
+      typingTimer = setTimeout(function () { typingBy[active] = null; render(); }, 4000);
+    }
+  });
+
+  render();
+  openThread(1);
+})();
+</script>
+</body>
+</html>

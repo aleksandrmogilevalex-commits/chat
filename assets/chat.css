@@ -1,0 +1,358 @@
+/* ============================================================
+   Telegram-подобный чат: заказчик ↔ исполнитель
+   Тема светлая, без внешних ресурсов (шаблон фона — SVG data-URI)
+   ============================================================ */
+
+.tg {
+  --tg-blue: #3390ec;
+  --tg-blue-soft: rgba(51, 144, 236, 0.12);
+  --tg-out: #eeffd8;
+  --tg-out-check: #4fae4e;
+  --tg-side-bg: #ffffff;
+  --tg-chat-bg-1: #dbe6f0;
+  --tg-chat-bg-2: #edf2f7;
+  --tg-text: #17212b;
+  --tg-text-2: #707579;
+  --tg-line: #e7e8ec;
+  --tg-radius: 14px;
+
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 480px;
+  max-width: 1100px;
+  margin: 0 auto;
+  background: var(--tg-side-bg);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 2px 20px rgba(23, 33, 43, 0.12);
+  font: 15px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  color: var(--tg-text);
+  text-align: left;
+}
+.tg * { box-sizing: border-box; }
+
+/* ---------- Левая колонка: список диалогов ---------- */
+.tg-side {
+  width: 330px;
+  flex: 0 0 330px;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--tg-line);
+  background: var(--tg-side-bg);
+}
+.tg-side-head {
+  padding: 14px 18px;
+  font-size: 17px;
+  font-weight: 700;
+  border-bottom: 1px solid var(--tg-line);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 56px;
+}
+.tg-side-head .tg-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #4ddb64;
+  box-shadow: 0 0 0 3px rgba(77, 219, 100, 0.25);
+}
+.tg-list { flex: 1; overflow-y: auto; padding: 6px 8px; }
+
+.tg-item {
+  display: flex;
+  gap: 12px;
+  padding: 9px 10px;
+  border-radius: 12px;
+  cursor: pointer;
+  align-items: center;
+  user-select: none;
+}
+.tg-item:hover { background: #f4f4f5; }
+.tg-item.active { background: var(--tg-blue-soft); }
+
+.tg-ava {
+  width: 54px; height: 54px;
+  flex: 0 0 54px;
+  border-radius: 50%;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  position: relative;
+}
+.tg-ava.sm { width: 42px; height: 42px; flex-basis: 42px; font-size: 16px; }
+.tg-ava .tg-online {
+  position: absolute;
+  right: 1px; bottom: 1px;
+  width: 13px; height: 13px;
+  border-radius: 50%;
+  background: #4ddb64;
+  border: 2.5px solid #fff;
+  display: none;
+}
+.tg-ava.is-online .tg-online { display: block; }
+
+.tg-item-body { flex: 1; min-width: 0; }
+.tg-row1 { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.tg-name {
+  font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tg-time { color: var(--tg-text-2); font-size: 12px; flex: none; }
+.tg-row1 .tg-time.unread { color: var(--tg-blue); font-weight: 700; }
+.tg-row2 { display: flex; justify-content: space-between; gap: 8px; margin-top: 2px; }
+.tg-prev {
+  color: var(--tg-text-2);
+  font-size: 14px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tg-prev .you { color: #000; }
+.tg-prev.typing { color: var(--tg-blue); font-style: italic; }
+.tg-badge {
+  flex: none;
+  min-width: 22px; height: 22px;
+  padding: 0 6px;
+  border-radius: 11px;
+  background: var(--tg-blue);
+  color: #fff;
+  font-size: 13px; font-weight: 600;
+  display: flex; align-items: center; justify-content: center;
+}
+.tg-subject { color: var(--tg-blue); font-size: 12.5px; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- Правая колонка ---------- */
+.tg-main { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; background: var(--tg-chat-bg-2); }
+
+.tg-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--tg-text-2);
+  font-size: 15px;
+}
+
+.tg-chat { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.tg-chat[hidden] { display: none; }
+
+.tg-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  min-height: 60px;
+  background: #fff;
+  border-bottom: 1px solid var(--tg-line);
+  z-index: 2;
+}
+.tg-back {
+  display: none;
+  border: 0; background: none;
+  font-size: 22px;
+  color: var(--tg-text-2);
+  cursor: pointer;
+  padding: 4px 6px;
+  margin-left: -6px;
+}
+.tg-head-body { min-width: 0; }
+.tg-head-name { font-weight: 700; font-size: 15.5px; }
+.tg-head-status { color: var(--tg-text-2); font-size: 13px; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tg-head-status.typing, .tg-head-status.online { color: var(--tg-blue); }
+.tg-head-status.typing { font-style: italic; }
+
+/* ---------- Лента сообщений ---------- */
+.tg-msgs {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='0.35' stroke-width='2'%3E%3Ccircle cx='24' cy='30' r='7'/%3E%3Cpath d='M95 18l8 8m0-8l-8 8'/%3E%3Crect x='60' y='55' width='14' height='14' rx='4'/%3E%3Ccircle cx='115' cy='95' r='4'/%3E%3Cpath d='M20 90q6-10 12 0t12 0'/%3E%3Ccircle cx='70' cy='115' r='5'/%3E%3Cpath d='M100 125l6 6m0-6l-6 6'/%3E%3Cpath d='M35 125h12'/%3E%3C/g%3E%3C/svg%3E"),
+    linear-gradient(160deg, var(--tg-chat-bg-1), var(--tg-chat-bg-2));
+}
+.tg-scroll { position: absolute; inset: 0; overflow-y: auto; padding: 14px 6% 10px; }
+
+.tg-day {
+  text-align: center;
+  margin: 10px 0 6px;
+}
+.tg-day span {
+  background: rgba(0, 0, 0, 0.18);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 3px 12px;
+  border-radius: 13px;
+}
+
+.tg-m { display: flex; margin: 2px 0; }
+.tg-m.out { justify-content: flex-end; }
+
+.tg-bubble {
+  position: relative;
+  max-width: min(480px, 82%);
+  border-radius: var(--tg-radius);
+  padding: 7px 10px 7px 11px;
+  box-shadow: 0 1px 1px rgba(23, 33, 43, 0.12);
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+}
+.tg-m.in  .tg-bubble { background: #fff; border-bottom-left-radius: 6px; }
+.tg-m.out .tg-bubble { background: var(--tg-out); border-bottom-right-radius: 6px; }
+.tg-m.pending .tg-bubble { opacity: 0.75; }
+.tg-m.fail .tg-bubble { box-shadow: 0 0 0 2px #e53935 inset; }
+
+.tg-text { font-size: 15px; }
+.tg-meta {
+  float: right;
+  margin: 8px -2px -4px 8px;
+  color: var(--tg-text-2);
+  font-size: 12px;
+  line-height: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  user-select: none;
+}
+.tg-m.out .tg-meta { color: #58b158; }
+.tg-checks { font-size: 13px; letter-spacing: -3px; }
+.tg-checks.single { letter-spacing: 0; margin-right: -3px; }
+.tg-checks.pending { letter-spacing: 0; }
+
+/* картинка во вложении */
+.tg-m.img .tg-bubble { padding: 3px; overflow: hidden; }
+.tg-m.img img {
+  display: block;
+  max-width: 100%;
+  width: auto; max-height: 340px;
+  border-radius: 12px;
+}
+.tg-m.img .tg-meta {
+  position: absolute;
+  right: 8px; bottom: 8px;
+  float: none; margin: 0;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff !important;
+  padding: 2px 9px;
+  border-radius: 11px;
+  backdrop-filter: blur(2px);
+}
+.tg-m.img.has-text .tg-meta { position: static; float: right; background: none; color: #58b158 !important; backdrop-filter: none; padding: 0 4px 2px 0; }
+
+/* файл-документ */
+.tg-file { display: flex; gap: 10px; align-items: center; padding: 4px 2px 6px; }
+.tg-file-ico {
+  width: 44px; height: 44px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--tg-blue);
+  color: #fff;
+  display: flex; align-items: center; justify-content: center;
+}
+.tg-file-name { font-weight: 600; font-size: 14.5px; color: var(--tg-blue); text-decoration: none; }
+.tg-file-name:hover { text-decoration: underline; }
+.tg-file-size { color: var(--tg-text-2); font-size: 13px; margin-top: 1px; }
+
+.tg-hist-btn {
+  display: block;
+  margin: 4px auto 10px;
+  border: 0;
+  background: rgba(0, 0, 0, 0.18);
+  color: #fff;
+  font-size: 13px;
+  padding: 5px 14px;
+  border-radius: 13px;
+  cursor: pointer;
+}
+.tg-hist-btn:hover { background: rgba(0, 0, 0, 0.28); }
+
+/* ---------- Поле ввода ---------- */
+.tg-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 9px 12px;
+  background: #fff;
+  border-top: 1px solid var(--tg-line);
+}
+.tg-composer button { border: 0; background: none; cursor: pointer; padding: 0; }
+.tg-attach {
+  width: 42px; height: 42px;
+  border-radius: 50%;
+  color: var(--tg-text-2);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px;
+  flex: none;
+}
+.tg-attach:hover { background: #f1f3f5; }
+.tg-input-wrap {
+  flex: 1;
+  background: #f1f3f5;
+  border-radius: 20px;
+  padding: 9px 16px;
+}
+.tg-input {
+  width: 100%;
+  border: 0;
+  background: none;
+  outline: none;
+  resize: none;
+  font: inherit;
+  line-height: 1.35;
+  max-height: 132px;
+  display: block;
+  color: var(--tg-text);
+}
+.tg-send {
+  width: 46px; height: 46px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--tg-blue);
+  color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  transition: transform 0.1s, background 0.15s;
+}
+.tg-send:hover { background: #2b7fd4; }
+.tg-send:active { transform: scale(0.92); }
+.tg-send:disabled { background: #a5c8ee; cursor: default; }
+
+.tg-loader {
+  width: 26px; height: 26px;
+  margin: 30px auto;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.6);
+  border-top-color: #fff;
+  animation: tg-spin 0.8s linear infinite;
+}
+@keyframes tg-spin { to { transform: rotate(360deg); } }
+
+.tg-conn {
+  position: absolute;
+  top: 68px; left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 12.5px;
+  padding: 4px 12px;
+  border-radius: 12px;
+  z-index: 5;
+  display: none;
+  white-space: nowrap;
+}
+.tg-conn.show { display: block; }
+
+/* ---------- Мобильная версия ---------- */
+@media (max-width: 860px) {
+  .tg { border-radius: 0; }
+  .tg-side { width: 100%; flex-basis: 100%; }
+  .tg .tg-main { display: none; }
+  .tg.open .tg-side { display: none; }
+  .tg.open .tg-main { display: flex; }
+  .tg-back { display: block; }
+  .tg-scroll { padding: 12px 10px 8px; }
+  .tg-bubble { max-width: 88%; }
+}

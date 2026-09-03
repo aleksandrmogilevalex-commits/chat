@@ -1,0 +1,6 @@
+# вложения чата (сами файлы не в git, только защита каталога)
+uploads/chat/*
+!uploads/chat/.htaccess
+
+.DS_Store
+Thumbs.db

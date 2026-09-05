@@ -7,6 +7,28 @@ declare(strict_types=1);
 // (см. chat_current_user_id и chat_user_info ниже).
 // ============================================================
 
+// UTF-8-безопасные строковые функции: используют mbstring, если расширение
+// установлено, иначе корректный fallback (иначе API падал бы с 500 на хостингах
+// без php-mbstring: "Call to undefined function mb_strlen()").
+function chat_strlen(string $s): int
+{
+    if (function_exists('mb_strlen')) {
+        return mb_strlen($s, 'UTF-8');
+    }
+    return preg_match_all('/./us', $s) ?: strlen($s);
+}
+
+function chat_substr(string $s, int $start, ?int $len = null): string
+{
+    if (function_exists('mb_substr')) {
+        return mb_substr($s, $start, $len, 'UTF-8');
+    }
+    if (preg_match_all('/./us', $s, $m)) {
+        return implode('', array_slice($m[0], $start, $len));
+    }
+    return $len === null ? substr($s, $start) : substr($s, $start, $len);
+}
+
 function chat_config(): array
 {
     static $cfg = null;
@@ -82,9 +104,14 @@ function chat_users_info(array $ids): array
         return [];
     }
     $cfg = chat_config();
-    $table = $cfg['users_table'];
-    $col  = $cfg['users_name_col'];
-    $in   = implode(',', array_fill(0, count($ids), '?'));
+    // Имена таблицы/колонки берутся из config, но на всякий случай валидируем:
+    // в SQL они подставляются напрямую (плейсхолдеры для идентификаторов невозможны).
+    $table = preg_replace('/[^A-Za-z0-9_]/', '', (string)$cfg['users_table']);
+    $col   = preg_replace('/[^A-Za-z0-9_]/', '', (string)$cfg['users_name_col']);
+    if ($table === '' || $col === '') {
+        return [];
+    }
+    $in = implode(',', array_fill(0, count($ids), '?'));
     $st   = chat_db()->prepare("SELECT id, `{$col}` AS name FROM `{$table}` WHERE id IN ($in)");
     $st->execute($ids);
     $out = [];
@@ -189,7 +216,7 @@ function chat_save_upload(array $file): array
     $images = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
     return [
         $rel . '/' . $name,
-        mb_substr((string)$file['name'], 0, 200),
+        chat_substr((string)$file['name'], 0, 200),
         (int)$file['size'],
         in_array($ext, $images, true) ? 1 : 0,
     ];

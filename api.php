@@ -16,6 +16,15 @@ $me  = chat_current_user_id();
 if (!$me) {
     json_out(['error' => 'auth'], 401);
 }
+
+// CSRF-защита изменяющих запросов: JS-виджет шлёт свой заголовок,
+// HTML-форма с чужого сайта его выставить не может (для кросс-домена
+// нестандартный заголовок требует CORS-preflight, который здесь не разрешён).
+if ($_SERVER['REQUEST_METHOD'] === 'POST'
+    && ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') !== 'ChatWidget') {
+    json_out(['error' => 'csrf'], 403);
+}
+
 chat_touch_presence($me);
 $pdo = chat_db();
 
@@ -188,16 +197,24 @@ try {
         if ($threadId <= 0 || !chat_is_participant($threadId, $me)) {
             json_out(['error' => 'forbidden'], 403);
         }
-        if ($body === '' && empty($_FILES['file'])) {
+        // «файл есть», только если он реально загружен (пустой input не считается)
+        $hasFile = isset($_FILES['file'])
+            && ($_FILES['file']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE;
+        if ($body === '' && !$hasFile) {
             json_out(['error' => 'empty'], 400);
         }
-        if (mb_strlen($body) > 4000) {
-            $body = mb_substr($body, 0, 4000);
+        if (chat_strlen($body) > 4000) {
+            $body = chat_substr($body, 0, 4000);
         }
 
         $filePath = null; $fileName = null; $fileSize = null; $isImage = 0;
-        if (!empty($_FILES['file'])) {
-            [$filePath, $fileName, $fileSize, $isImage] = chat_save_upload($_FILES['file']);
+        if ($hasFile) {
+            try {
+                [$filePath, $fileName, $fileSize, $isImage] = chat_save_upload($_FILES['file']);
+            } catch (RuntimeException $e) {
+                // ошибка валидации файла — это 400, а не 500
+                json_out(['error' => 'file', 'message' => $e->getMessage()], 400);
+            }
         }
 
         $pdo->prepare(
@@ -238,6 +255,10 @@ try {
             json_out(['error' => 'unknown_user'], 404);
         }
 
+        // Блокировка от гонки: два одновременных «start» не создадут два диалога
+        $lockName = 'chat_start_' . min($me, $recipient) . '_' . max($me, $recipient);
+        $pdo->prepare('SELECT GET_LOCK(:n, 5)')->execute([':n' => $lockName]);
+
         // существующий диалог ровно с этими двумя участниками (как «личка» в Телеграме)
         $st = $pdo->prepare(
             "SELECT p.thread_id
@@ -253,12 +274,20 @@ try {
         $threadId = $st->fetchColumn();
 
         if (!$threadId) {
-            $pdo->prepare('INSERT INTO chat_threads (subject) VALUES (:s)')
-                ->execute([':s' => $subject !== '' ? mb_substr($subject, 0, 255) : null]);
-            $threadId = (int)$pdo->lastInsertId();
-            $pdo->prepare('INSERT INTO chat_participants (thread_id, user_id) VALUES (:t, :u), (:t2, :u2)')
-                ->execute([':t' => $threadId, ':u' => $me, ':t2' => $threadId, ':u2' => $recipient]);
+            $pdo->beginTransaction();
+            try {
+                $pdo->prepare('INSERT INTO chat_threads (subject) VALUES (:s)')
+                    ->execute([':s' => $subject !== '' ? chat_substr($subject, 0, 255) : null]);
+                $threadId = (int)$pdo->lastInsertId();
+                $pdo->prepare('INSERT INTO chat_participants (thread_id, user_id) VALUES (:t, :u), (:t2, :u2)')
+                    ->execute([':t' => $threadId, ':u' => $me, ':t2' => $threadId, ':u2' => $recipient]);
+                $pdo->commit();
+            } catch (Throwable $e) {
+                $pdo->rollBack();
+                throw $e;
+            }
         }
+        $pdo->prepare('SELECT RELEASE_LOCK(:n)')->execute([':n' => $lockName]);
         json_out(['thread_id' => (int)$threadId]);
     }
 
@@ -278,5 +307,8 @@ try {
         json_out(['error' => 'unknown_action'], 404);
     }
 } catch (Throwable $e) {
-    json_out(['error' => 'server', 'message' => $e->getMessage()], 500);
+    // Текст исключения — в лог сервера; клиенту деталей не раскрываем
+    // (сообщения PDO могут содержать имена таблиц/колонок и параметры запросов).
+    error_log('[chat] ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
+    json_out(['error' => 'server'], 500);
 }

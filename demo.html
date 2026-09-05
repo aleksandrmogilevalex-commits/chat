@@ -26,7 +26,7 @@ body {
 }
 .role-btn.active { background: #3390ec; border-color: #3390ec; color: #fff; font-weight: 600; }
 .demo-note { margin-left: auto; font-size: 12.5px; color: #8fa3b5; }
-#chat { flex: 1; min-height: 0; padding: 14px; }
+#chat.tg { flex: 1; min-height: 0; height: auto; margin: 14px auto; width: calc(100% - 28px); }
 .toast {
   position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
   background: rgba(23,33,43,.92); color: #fff;
@@ -87,7 +87,7 @@ body {
 .tg-main { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; background: var(--tg-chat-bg-2); }
 .tg-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--tg-text-2); font-size: 15px; }
 .tg-chat { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-.tg-chat[hidden] { display: none; }
+.tg-chat[hidden], .tg-empty[hidden] { display: none; }
 .tg-head { display: flex; align-items: center; gap: 12px; padding: 8px 14px; min-height: 60px; background: #fff; border-bottom: 1px solid var(--tg-line); z-index: 2; }
 .tg-back { display: none; border: 0; background: none; font-size: 22px; color: var(--tg-text-2); cursor: pointer; padding: 4px 6px; margin-left: -6px; }
 .tg-head-body { min-width: 0; }
@@ -128,9 +128,9 @@ body {
 .tg-attach:hover { background: #f1f3f5; }
 .tg-input-wrap { flex: 1; background: #f1f3f5; border-radius: 20px; padding: 9px 16px; }
 .tg-input { width: 100%; border: 0; background: none; outline: none; resize: none; font: inherit; line-height: 1.35; max-height: 132px; display: block; color: var(--tg-text); }
-.tg-send { width: 46px; height: 46px; flex: none; border-radius: 50%; background: var(--tg-blue); color: #fff; display: flex; align-items: center; justify-content: center; transition: transform .1s, background .15s; }
-.tg-send:hover { background: #2b7fd4; }
-.tg-send:active { transform: scale(.92); }
+.tg-composer .tg-send { width: 46px; height: 46px; flex: none; border-radius: 50%; background: var(--tg-blue); color: #fff; display: flex; align-items: center; justify-content: center; transition: transform .1s, background .15s; }
+.tg-composer .tg-send:hover { background: #2b7fd4; }
+.tg-composer .tg-send:active { transform: scale(.92); }
 @media (max-width: 860px) {
   .tg { border-radius: 0; }
   .tg-side { width: 100%; flex-basis: 100%; }
@@ -152,7 +152,7 @@ body {
   <span class="demo-note">Отправьте сообщение, затем переключите роль — увидите галочки ✓✓ и «печатает…»</span>
 </div>
 
-<div id="chat"></div>
+<div id="chat" class="tg"></div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -274,7 +274,7 @@ body {
     + '    </header>'
     + '    <div class="tg-msgs"><div class="tg-scroll" id="d-scroll"></div></div>'
     + '    <footer class="tg-composer">'
-    + '      <button class="tg-attach" id="d-attach" title="Прикрепить файл">&#128206;</button>'
+    + '      <button class="tg-attach" id="d-attach" title="Прикрепить файл"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>'
     + '      <div class="tg-input-wrap"><textarea class="tg-input" id="d-input" placeholder="Сообщение…" rows="1"></textarea></div>'
     + '      <button class="tg-send" id="d-send" title="Отправить"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>'
     + '    </footer>'
@@ -292,7 +292,9 @@ body {
       if (typingBy[t.id] && typingBy[t.id] !== role) {
         prev = '<span class="tg-prev typing">печатает…</span>';
       } else if (last) {
-        var txt = last.fname ? (last.img ? '🖼 Фото' : '📎 ' + esc(last.fname)) : esc(last.body);
+        var ICO_P = '<svg class="tg-ico" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-2px;margin-right:4px;color:#3390ec"><path d="M21 19V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2zM8.5 13.5l2.5 3 3.5-4.5 4.5 6H5l3.5-4.5z"/></svg>';
+      var ICO_F = '<svg class="tg-ico" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-2px;margin-right:4px;color:#3390ec"><path d="M5 2a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8l-6-6H5zm8 1.5L19.5 10H13V3.5z"/></svg>';
+      var txt = last.fname ? (last.img ? ICO_P + 'Фото' : ICO_F + esc(last.fname)) : esc(last.body);
         if (last.sender === role) txt = '<span class="you">Вы:</span> ' + txt;
         prev = '<span class="tg-prev">' + txt + '</span>';
         time = fmtListTime(last.ts);

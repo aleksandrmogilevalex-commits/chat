@@ -2,17 +2,23 @@
 require __DIR__ . '/helpers.php';
 $cfg = chat_config();
 $me  = chat_current_user_id();
+$dbError = null;
 try {
     $demoUsers = $cfg['demo_auth'] ? chat_users_info([1, 2, 3]) : [];
 } catch (Throwable $e) {
     // БД недоступна и т.п. — показываем страницу, а не «белый экран»
     error_log('[chat] ' . $e->getMessage());
     $demoUsers = [];
+    $dbError = 'База данных чата недоступна. Проверьте настройки в config.php и выполните install.sql.';
 }
 
 $guestMsg = 'Войдите на сайт, чтобы видеть свои сообщения.';
 if ($cfg['demo_auth'] && !$me) {
     $guestMsg .= '<br><br>Тест: <a href="?act_as=1" style="color:#3390ec">войти как Анна (заказчик)</a>';
+}
+if ($dbError !== null) {
+    $guestMsg = '<b style="color:#e53935">' . htmlspecialchars($dbError) . '</b>';
+    $me = null; // виджет без БД не запускаем
 }
 $guestBox = '<div style="background:#fff;border-radius:14px;max-width:520px;margin:40px auto;'
     . 'padding:28px;text-align:center;box-shadow:0 2px 20px rgba(23,33,43,.12)">' . $guestMsg . '</div>';
@@ -58,6 +64,10 @@ $guestBox = '<div style="background:#fff;border-radius:14px;max-width:520px;marg
         <a href="?act_as=<?= $u['id'] ?>"><?= htmlspecialchars($u['name']) ?></a>
       <?php endif; ?>
     <?php endforeach; ?>
+    <?php if ($me): ?>
+      &nbsp;·&nbsp; <a href="#" id="demo-write">Написать <?= $me === 3 ? 'Анне' : 'Максиму' ?></a>
+      <small style="color:#888">(пример ChatWidget.openWith)</small>
+    <?php endif; ?>
     &nbsp;·&nbsp; на продакшене выключите <code>demo_auth</code> в config.php
   </div>
 <?php endif; ?>
@@ -69,6 +79,12 @@ $guestBox = '<div style="background:#fff;border-radius:14px;max-width:520px;marg
 <script>
 <?php if ($me): ?>
   ChatWidget.mount(document.getElementById('chat'), { api: 'api.php' });
+  // Пример кнопки «Написать исполнителю» со страницы заказа:
+  var w = document.getElementById('demo-write');
+  if (w) w.addEventListener('click', function (e) {
+    e.preventDefault();
+    ChatWidget.openWith(<?= $me === 3 ? 1 : 3 ?>, 'Заказ №128 — логотип');
+  });
 <?php else: ?>
   document.getElementById('chat').innerHTML = <?= json_encode($guestBox, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG) ?>;
 <?php endif; ?>

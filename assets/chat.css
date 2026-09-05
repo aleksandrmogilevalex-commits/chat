@@ -110,6 +110,9 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .tg-prev .you { color: #000; }
+.tg-prev .tg-ico { vertical-align: -2px; margin-right: 4px; color: var(--tg-blue); }
+.tg-item:focus-visible { outline: 2px solid var(--tg-blue); outline-offset: -2px; }
+.tg-nothreads { padding: 20px; color: var(--tg-text-2); text-align: center; }
 .tg-prev.typing { color: var(--tg-blue); font-style: italic; }
 .tg-badge {
   flex: none;
@@ -136,7 +139,8 @@
 }
 
 .tg-chat { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-.tg-chat[hidden] { display: none; }
+/* display:flex у .tg-empty/.tg-chat перебивает атрибут hidden — задаём явно */
+.tg-chat[hidden], .tg-empty[hidden] { display: none; }
 
 .tg-head {
   display: flex;
@@ -207,6 +211,15 @@
 .tg-m.fail .tg-bubble { box-shadow: 0 0 0 2px #e53935 inset; }
 
 .tg-text { font-size: 15px; }
+.tg-text a { color: var(--tg-blue); text-decoration: underline; word-break: break-all; }
+.tg-nomsg {
+  display: flex; align-items: center; justify-content: center;
+  height: 100%; min-height: 200px;
+}
+.tg-nomsg span {
+  background: rgba(0, 0, 0, 0.18); color: #fff;
+  font-size: 13.5px; padding: 8px 16px; border-radius: 14px; text-align: center;
+}
 .tg-meta {
   float: right;
   margin: 8px -2px -4px 8px;
@@ -221,12 +234,16 @@
 .tg-m.out .tg-meta { color: #58b158; }
 .tg-checks { font-size: 13px; letter-spacing: -3px; }
 .tg-checks.single { letter-spacing: 0; margin-right: -3px; }
-.tg-checks.pending { letter-spacing: 0; }
+.tg-checks.pending { letter-spacing: 0; display: inline-flex; align-items: center; }
+.tg-checks.fail { color: #e53935; font-weight: 700; }
 
 /* картинка во вложении */
 .tg-m.img .tg-bubble { padding: 3px; overflow: hidden; }
+.tg-m.img .tg-img-link { display: block; line-height: 0; }
 .tg-m.img img {
   display: block;
+  min-width: 120px; min-height: 80px;
+  background: rgba(0, 0, 0, 0.06);
   max-width: 100%;
   width: auto; max-height: 340px;
   border-radius: 12px;
@@ -253,7 +270,11 @@
   color: #fff;
   display: flex; align-items: center; justify-content: center;
 }
-.tg-file-name { font-weight: 600; font-size: 14.5px; color: var(--tg-blue); text-decoration: none; }
+.tg-file-body { min-width: 0; }
+.tg-file-name {
+  font-weight: 600; font-size: 14.5px; color: var(--tg-blue); text-decoration: none;
+  display: block; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .tg-file-name:hover { text-decoration: underline; }
 .tg-file-size { color: var(--tg-text-2); font-size: 13px; margin-top: 1px; }
 
@@ -279,8 +300,8 @@
   background: #fff;
   border-top: 1px solid var(--tg-line);
 }
-.tg-composer button { border: 0; background: none; cursor: pointer; padding: 0; }
-.tg-attach {
+.tg-composer button { border: 0; background: none; cursor: pointer; padding: 0; font: inherit; }
+.tg-composer .tg-attach {
   width: 42px; height: 42px;
   border-radius: 50%;
   color: var(--tg-text-2);
@@ -288,7 +309,30 @@
   font-size: 22px;
   flex: none;
 }
-.tg-attach:hover { background: #f1f3f5; }
+.tg-composer .tg-attach:hover { background: #f1f3f5; color: var(--tg-blue); }
+.tg-main.dragover::after {
+  content: 'Отпустите файл, чтобы отправить';
+  position: absolute; inset: 0; z-index: 6;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(51, 144, 236, 0.18);
+  border: 3px dashed var(--tg-blue);
+  color: #17212b; font-weight: 600; font-size: 16px;
+  pointer-events: none;
+}
+.tg-toast {
+  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+  background: rgba(23, 33, 43, 0.92); color: #fff;
+  font-size: 13.5px; padding: 8px 16px; border-radius: 10px;
+  opacity: 0; pointer-events: none; transition: opacity 0.25s; z-index: 6;
+  max-width: 90%; text-align: center;
+}
+.tg-toast.show { opacity: 1; }
+.tg-msgs.loading-older::before {
+  content: ''; position: absolute; top: 10px; left: 50%; margin-left: -9px; z-index: 4;
+  width: 18px; height: 18px; border-radius: 50%;
+  border: 2.5px solid rgba(255, 255, 255, 0.6); border-top-color: #fff;
+  animation: tg-spin 0.8s linear infinite;
+}
 .tg-input-wrap {
   flex: 1;
   background: #f1f3f5;
@@ -307,7 +351,8 @@
   display: block;
   color: var(--tg-text);
 }
-.tg-send {
+/* селекторы с .tg-composer — иначе правило «.tg-composer button {background:none}» выше по специфичности гасит синий фон */
+.tg-composer .tg-send {
   width: 46px; height: 46px;
   flex: none;
   border-radius: 50%;
@@ -316,9 +361,10 @@
   display: flex; align-items: center; justify-content: center;
   transition: transform 0.1s, background 0.15s;
 }
-.tg-send:hover { background: #2b7fd4; }
-.tg-send:active { transform: scale(0.92); }
-.tg-send:disabled { background: #a5c8ee; cursor: default; }
+.tg-composer .tg-send svg { margin-left: 2px; }
+.tg-composer .tg-send:hover { background: #2b7fd4; }
+.tg-composer .tg-send:active { transform: scale(0.92); }
+.tg-composer .tg-send:disabled { background: #a5c8ee; cursor: default; }
 
 .tg-loader {
   width: 26px; height: 26px;
@@ -345,13 +391,14 @@
 }
 .tg-conn.show { display: block; }
 
-/* ---------- «Повторить отправление» у несостоявшегося сообщения ---------- */
-.tg-retry-row { margin-top: 3px; text-align: right; }
-.tg-retry {
-  color: var(--tg-blue); font-size: 12.5px; font-weight: 600;
+/* ---------- «Повторить · Удалить» у несостоявшегося сообщения ---------- */
+.tg-retry-row { clear: both; margin-top: 4px; font-size: 12.5px; color: var(--tg-text-2); text-align: right; }
+.tg-err { color: #e53935; }
+.tg-retry, .tg-drop {
+  color: var(--tg-blue); font-weight: 600;
   cursor: pointer; user-select: none; text-decoration: underline;
 }
-.tg-retry:hover { color: #2b7fd4; }
+.tg-retry:hover, .tg-drop:hover { color: #2b7fd4; }
 .tg-m.fail .tg-bubble { opacity: .85; }
 
 /* ---------- Мобильная версия ---------- */
@@ -364,4 +411,7 @@
   .tg-back { display: block; }
   .tg-scroll { padding: 12px 10px 8px; }
   .tg-bubble { max-width: 88%; }
+  .tg-input { font-size: 16px; }   /* iOS не зумит поле при фокусе, если шрифт >= 16px */
+  .tg-composer { padding-bottom: calc(9px + env(safe-area-inset-bottom, 0px)); }
+  .tg-file-name { max-width: 180px; }
 }

@@ -36,7 +36,8 @@ if (!$m || !$m['file_path'] || !chat_is_participant((int)$m['thread_id'], $me)) 
 $base = rtrim(chat_config()['uploads_dir'], '/');
 $path = $base . '/' . $m['file_path'];
 $real = realpath($path);
-if ($real === false || !str_starts_with($real, realpath($base))) {
+$baseReal = realpath($base);
+if ($real === false || $baseReal === false || strpos($real, $baseReal) !== 0) {
     http_response_code(404);
     exit;
 }
@@ -64,7 +65,7 @@ $ascii = preg_replace('/[^A-Za-z0-9._-]/', '_', $name) ?: 'file';
 header('Content-Type: ' . $mime);
 header('Content-Length: ' . (string)filesize($real));
 header('X-Content-Type-Options: nosniff');
-if ((int)$m['is_image'] === 1 && str_starts_with($mime, 'image/')) {
+if ((int)$m['is_image'] === 1 && strpos($mime, 'image/') === 0) {
     header('Content-Disposition: inline; filename="' . $ascii . '"; filename*=UTF-8\'\'' . rawurlencode($name));
 } else {
     header('Content-Disposition: attachment; filename="' . $ascii . '"; filename*=UTF-8\'\'' . rawurlencode($name));

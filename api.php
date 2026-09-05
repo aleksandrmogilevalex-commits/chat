@@ -58,7 +58,7 @@ try {
         $st->execute([':meA' => $me, ':meB' => $me, ':meC' => $me]);
         $rows = $st->fetchAll();
 
-        $names  = chat_users_info(array_map(fn($r) => (int)$r['other_id'], $rows));
+        $names  = chat_users_info(array_map(function ($r) { return (int)$r['other_id']; }, $rows));
         $online = chat_online_map(array_keys($names));
         $now    = time();
 

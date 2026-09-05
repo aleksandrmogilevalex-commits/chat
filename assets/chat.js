@@ -21,7 +21,10 @@
     els: {},
     seq: 0,
     loadingOlder: false,
-    started: false
+    started: false,
+    csrfPromise: null, // промис с CSRF-токеном (кэшируется)
+    docBound: false,   // глобальный listener висит один раз
+    lastSig: ''        // сигнатура списка диалогов — не перерисовывать зря
   };
 
   /* ---------------- Утилиты ---------------- */
@@ -76,7 +79,8 @@
   }
 
   /* ---------------- API ---------------- */
-  function api(action, params, method) {
+  /** Низкий уровень: сам fetch, без CSRF. token — для POST. */
+  function rawApi(action, params, method, token) {
     var url = state.api + '?action=' + encodeURIComponent(action);
     var opt = { method: method || 'GET' };
     if (opt.method === 'GET') {
@@ -89,13 +93,48 @@
         if (params[k] !== undefined && params[k] !== null) fd.append(k, params[k]);
       });
       opt.body = fd;
+      if (token) opt.headers = { 'X-CSRF-Token': token };
     }
     return fetch(url, opt).then(function (r) {
-      return r.json().then(function (data) {
-        if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+      // Ответ может быть не-JSON (например, 502 от прокси) — не роняем виджет
+      return r.json().catch(function () { return { error: 'bad_response' }; }).then(function (data) {
+        if (!r.ok) throw new Error((data && data.error) || ('HTTP ' + r.status));
         return data;
       });
     });
+  }
+
+  /** Промис с CSRF-токеном (один запрос, кэшируется; сбрасывается при ошибке). */
+  function csrfPromise() {
+    if (!state.csrfPromise) {
+      state.csrfPromise = rawApi('csrf', null, 'GET').then(function (d) {
+        return d.token;
+      }).catch(function (e) {
+        state.csrfPromise = null;
+        throw e;
+      });
+    }
+    return state.csrfPromise;
+  }
+
+  /**
+   * API. Для POST подставляется заголовок X-CSRF-Token; если сервер ответил
+   * «csrf» (например, сессия пересоздана) — берём новый токен и повторяем один раз.
+   */
+  function api(action, params, method) {
+    if (method !== 'POST') {
+      return rawApi(action, params, method);
+    }
+    function postOnce(token, mayRetry) {
+      return rawApi(action, params, 'POST', token).catch(function (e) {
+        if (mayRetry && String(e.message) === 'csrf') {
+          state.csrfPromise = null;
+          return csrfPromise().then(function (t2) { return postOnce(t2, false); });
+        }
+        throw e;
+      });
+    }
+    return csrfPromise().then(function (token) { return postOnce(token, true); });
   }
 
   /* ---------------- Шаблон каркаса ---------------- */
@@ -170,9 +209,23 @@
       if (state.els.scroll.scrollTop < 60 && !state.loadingOlder) loadOlder();
     });
 
-    document.addEventListener('visibilitychange', function () {
-      if (!document.hidden) tick(); // вернулись на вкладку — сразу обновиться
+    // клик по «Повторить» у несостоявшегося сообщения (делегирование)
+    state.els.scroll.addEventListener('click', function (e) {
+      var r = e.target.closest ? e.target.closest('.tg-retry') : null;
+      if (!r || !state.activeId) return;
+      var arr = state.msgs[state.activeId] || [];
+      for (var i = 0; i < arr.length; i++) {
+        if (arr[i].id === r.dataset.msgid) { resend(arr[i]); break; }
+      }
     });
+
+    // document-обработчик вешаем один раз, даже при повторном mount()
+    if (!state.docBound) {
+      state.docBound = true;
+      document.addEventListener('visibilitychange', function () {
+        if (!document.hidden) tick(); // вернулись на вкладку — сразу обновиться
+      });
+    }
 
     if (state.started) return;
     state.started = true;
@@ -226,8 +279,14 @@
       state.threads = d.threads || [];
       state.els.conn.classList.remove('show');
       if (d.open) applyOpen(d.open);
-      renderThreads();
-      updateTitle();
+      // Поллинг идёт каждые 3 с — пересобираем список только когда данные
+      // реально изменились (иначе теряются hover/выделение текста, лишний CPU)
+      var sig = JSON.stringify(d.threads || []);
+      if (sig !== state.lastSig) {
+        renderThreads();
+        updateTitle();
+        state.lastSig = sig;
+      }
     }).catch(function (e) {
       state.els.conn.classList.toggle('show', String(e.message).indexOf('auth') === -1);
     }).then(function () {
@@ -277,30 +336,42 @@
       has_file: !!file,
       is_image: file ? !!file.type.match(/^image\//) : false,
       file_name: file ? file.name : null,
-      file_size: file ? file.size : null
+      file_size: file ? file.size : null,
+      file: file || null   // держим File, чтобы можно было «Повторить»
     };
     (state.msgs[tid] = state.msgs[tid] || []).push(tmp);
     input.value = ''; autoGrow();
+    state.els.file.value = '';
     renderMessages(true);
 
-    var fd = { thread_id: tid, body: text };
-    if (file) fd.file = file;
-    state.els.file.value = '';
+    doSend(tid, tmp);
+  }
 
+  /** Общая отправка сообщения (первая попытка и «Повторить»). */
+  function doSend(tid, m) {
+    m.pending = true; m.fail = false; m.error = '';
+    renderMessages();
+    var fd = { thread_id: tid, body: m.body };
+    if (m.file) fd.file = m.file;
     api('send', fd, 'POST').then(function (d) {
       var arr = state.msgs[tid] || [];
       for (var i = 0; i < arr.length; i++) {
-        if (arr[i].id === tmp.id) { arr.splice(i, 1); break; }
+        if (arr[i].id === m.id) { arr.splice(i, 1); break; }
       }
       arr.push(d.message);
       var maxId = 0;
-      arr.forEach(function (m) { if (typeof m.id === 'number' && m.id > maxId) maxId = m.id; });
+      arr.forEach(function (x) { if (typeof x.id === 'number' && x.id > maxId) maxId = x.id; });
       state.afterId[tid] = maxId;
       renderMessages(true);
     }).catch(function (e) {
-      tmp.pending = false; tmp.fail = true; tmp.error = e.message;
+      m.pending = false; m.fail = true; m.error = e.message;
       renderMessages();
     });
+  }
+
+  /** Повторить несостоявшееся сообщение (клик по «Повторить»). */
+  function resend(m) {
+    doSend(state.activeId, m);
   }
 
   /* ---------------- История вверх ---------------- */
@@ -397,13 +468,17 @@
       var inner = '';
 
       if (m.has_file) {
-        if (m.is_image && !m.pending && !m.fail) {
+        var canLink = !m.pending && !m.fail; // пока отправляется — ссылка неактивна
+        if (m.is_image && canLink) {
           cls += ' img' + (m.body ? ' has-text' : '');
           inner += '<img src="file.php?id=' + m.id + '" alt="" loading="lazy">';
         } else {
+          var nameHtml = canLink
+            ? '<a class="tg-file-name" href="file.php?id=' + m.id + '" download>' + esc(m.file_name || 'файл') + '</a>'
+            : '<span class="tg-file-name">' + esc(m.file_name || 'файл') + '</span>';
           inner += '<div class="tg-file">'
             + '<div class="tg-file-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M5 2a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8l-6-6H5zm8 1.5L19.5 10H13V3.5zM7 12h10v2H7v-2zm0 4h7v2H7v-2z"/></svg></div>'
-            + '<div><a class="tg-file-name" href="file.php?id=' + m.id + '" download>' + esc(m.file_name || 'файл') + '</a>'
+            + '<div>' + nameHtml
             + '<div class="tg-file-size">' + esc(fmtSize(m.file_size)) + '</div></div>'
             + '</div>';
         }
@@ -423,6 +498,11 @@
         }
       }
       inner += '<span class="tg-meta">' + fmtTime(m.ts) + checks + '</span>';
+
+      if (mine && m.fail) {
+        inner += '<div class="tg-retry-row"><span class="tg-retry" role="button" data-msgid="'
+          + esc(String(m.id)) + '">Повторить отправление</span></div>';
+      }
 
       if (m.pending) cls += ' pending';
       if (m.fail) cls += ' fail';

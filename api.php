@@ -6,9 +6,12 @@ require __DIR__ . '/helpers.php';
 // API чата. Все ответы — JSON.
 //   GET  ?action=sync[&thread_id=&after_id=&focused=1]  — диалоги + новые сообщения
 //   GET  ?action=history&thread_id=&before_id=          — история (прокрутка вверх)
+//   GET  ?action=csrf                                   — CSRF-токен для POST
 //   POST ?action=send     (thread_id, body[, file])     — отправить сообщение
 //   POST ?action=start    (recipient_id[, subject])     — найти/создать диалог 1-на-1
 //   POST ?action=typing   (thread_id)                   — «печатает…»
+// Все POST проверяют CSRF (заголовок X-CSRF-Token); отключается
+// в config.php: 'csrf_protection' => false.
 // ============================================================
 
 $cfg = chat_config();
@@ -20,9 +23,21 @@ chat_touch_presence($me);
 $pdo = chat_db();
 
 $action = $_GET['action'] ?? '';
+$pageSync = max(1, (int)($cfg['messages_page'] ?? 200));
+$pageHist = max(1, (int)($cfg['history_page'] ?? 50));
+
+// Защита от CSRF: все изменяющие действия идут только с токеном сессии
+if (in_array($action, ['send', 'start', 'typing'], true)) {
+    chat_require_csrf();
+}
 
 try {
     switch ($action) {
+
+    // ------------------------------------------------CSRF-токен для клиента
+    case 'csrf':
+        json_out(['token' => chat_csrf_token()]);
+
 
     // ------------------------------------------------Sync: список диалогов + сообщения
     case 'sync': {
@@ -110,7 +125,7 @@ try {
                             UNIX_TIMESTAMP(m.created_at) AS ts
                        FROM chat_messages m
                       WHERE m.thread_id = :t AND m.id > :after
-                      ORDER BY m.id ASC LIMIT {$cfg['messages_page']}"
+                      ORDER BY m.id ASC LIMIT $pageSync"
                 );
                 $st->execute([':t' => $threadId, ':after' => $afterId]);
                 $msgs = $st->fetchAll();
@@ -122,7 +137,7 @@ try {
                             UNIX_TIMESTAMP(m.created_at) AS ts
                        FROM chat_messages m
                       WHERE m.thread_id = :t
-                      ORDER BY m.id DESC LIMIT {$cfg['messages_page']}"
+                      ORDER BY m.id DESC LIMIT $pageSync"
                 );
                 $st->execute([':t' => $threadId]);
                 $msgs = array_reverse($st->fetchAll());
@@ -174,7 +189,7 @@ try {
                     UNIX_TIMESTAMP(m.created_at) AS ts
                FROM chat_messages m
               WHERE m.thread_id = :t AND m.id < :before
-              ORDER BY m.id DESC LIMIT {$cfg['history_page']}"
+              ORDER BY m.id DESC LIMIT $pageHist"
         );
         $st->execute([':t' => $threadId, ':before' => $beforeId]);
         $msgs = array_reverse($st->fetchAll());
@@ -186,6 +201,14 @@ try {
         $threadId = (int)($_POST['thread_id'] ?? 0);
         $body     = trim((string)($_POST['body'] ?? ''));
         if ($threadId <= 0 || !chat_is_participant($threadId, $me)) {
+            // Если POST-тело превысило post_max_size, PHP вычищает $_POST —
+            // тогда «forbidden» был бы ложной диагностикой. Говорим честно.
+            $isMultipart = stripos($_SERVER['CONTENT_TYPE'] ?? '', 'multipart/form-data') !== false;
+            $postMax     = (int)ini_get('post_max_size'); // байты
+            if ($isMultipart && empty($_POST) && empty($_FILES)
+                && $postMax > 0 && (int)($_SERVER['CONTENT_LENGTH'] ?? 0) > $postMax) {
+                json_out(['error' => 'Файл больше ' . $cfg['max_file_mb'] . ' МБ'], 400);
+            }
             json_out(['error' => 'forbidden'], 403);
         }
         if ($body === '' && empty($_FILES['file'])) {
@@ -277,6 +300,11 @@ try {
     default:
         json_out(['error' => 'unknown_action'], 404);
     }
+} catch (ChatClientError $e) {
+    // Ошибка ввода/файла — это не сбой сервера: 400, текст можно показать
+    json_out(['error' => $e->getMessage()], 400);
 } catch (Throwable $e) {
-    json_out(['error' => 'server', 'message' => $e->getMessage()], 500);
+    // Настоящие сбои логируем, но наружу не сливаем (там могут быть детали SQL)
+    error_log('[chat] ' . $e->getMessage() . ' @ ' . ($action ?: '?'));
+    json_out(['error' => 'server'], 500);
 }

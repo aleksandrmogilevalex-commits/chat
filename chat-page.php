@@ -2,7 +2,13 @@
 require __DIR__ . '/helpers.php';
 $cfg = chat_config();
 $me  = chat_current_user_id();
-$demoUsers = $cfg['demo_auth'] ? chat_users_info([1, 2, 3]) : [];
+try {
+    $demoUsers = $cfg['demo_auth'] ? chat_users_info([1, 2, 3]) : [];
+} catch (Throwable $e) {
+    // БД недоступна и т.п. — показываем страницу, а не «белый экран»
+    error_log('[chat] ' . $e->getMessage());
+    $demoUsers = [];
+}
 
 $guestMsg = 'Войдите на сайт, чтобы видеть свои сообщения.';
 if ($cfg['demo_auth'] && !$me) {

@@ -7,6 +7,13 @@ declare(strict_types=1);
 // (см. chat_current_user_id и chat_user_info ниже).
 // ============================================================
 
+/**
+ * Ошибка «вины клиента» (файл слишком большой, запрет тип и т.п.).
+ * api.php превращает её в HTTP 400, а не 500, и текст можно
+ * показывать пользователю (это не технические детали).
+ */
+class ChatClientError extends RuntimeException {}
+
 function chat_config(): array
 {
     static $cfg = null;
@@ -30,9 +37,10 @@ function chat_db(): PDO
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             PDO::ATTR_EMULATE_PREPARES   => false,
         ]);
-        // Синхронизируем MySQL с PHP-таймзоной (например, «+03:00» для Киева)
-        $offset = (new DateTimeImmutable())->format('P');
-        $pdo->exec("SET time_zone = '" . $offset . "'");
+        // БД храним в UTC: все сравнения (last_read, typing, unread) и
+        // UNIX_TIMESTAMP() для отображения тогда не зависят от ДВС/смены
+        // часового пояса. Локальный пояс остаётся за PHP (date_default_timezone_set).
+        $pdo->exec("SET time_zone = '+00:00'");
     }
     return $pdo;
 }
@@ -92,6 +100,38 @@ function chat_users_info(array $ids): array
         $out[(int)$row['id']] = ['id' => (int)$row['id'], 'name' => (string)$row['name']];
     }
     return $out;
+}
+
+/**
+ * CSRF-токен текущей сессии. Защита всех POST-действий API
+ * (send / start / typing) от кросс-сайтовых подделок.
+ */
+function chat_csrf_token(): string
+{
+    if (session_status() !== PHP_SESSION_ACTIVE) {
+        session_start();
+    }
+    if (empty($_SESSION['chat_csrf'])) {
+        $_SESSION['chat_csrf'] = bin2hex(random_bytes(32));
+    }
+    return $_SESSION['chat_csrf'];
+}
+
+/**
+ * Проверка CSRF для POST-запросов. Токен — заголовок X-CSRF-Token
+ * (или поле 'csrf' в теле формы). Если защита включена и токен
+ * неверный — сразу ответ 403.
+ */
+function chat_require_csrf(): void
+{
+    if (empty(chat_config()['csrf_protection'])) {
+        return;
+    }
+    $sent = $_SERVER['HTTP_X_CSRF_TOKEN']
+         ?? ($_POST['csrf'] ?? '');
+    if (!is_string($sent) || $sent === '' || !hash_equals(chat_csrf_token(), $sent)) {
+        json_out(['error' => 'csrf'], 403);
+    }
 }
 
 /** Обновить «был(а) в сети» для пользователя. */
@@ -163,28 +203,33 @@ function chat_message_row(array $m): array
 function chat_save_upload(array $file): array
 {
     $cfg = chat_config();
-    if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
-        throw new RuntimeException('Ошибка загрузки файла');
+    $err = $file['error'] ?? UPLOAD_ERR_NO_FILE;
+    if ($err !== UPLOAD_ERR_OK) {
+        // UPLOAD_ERR_INI_SIZE/FORM_SIZE — превышены лимиты PHP/формы
+        $msg = $err === UPLOAD_ERR_INI_SIZE || $err === UPLOAD_ERR_FORM_SIZE
+            ? 'Файл больше ' . $cfg['max_file_mb'] . ' МБ'
+            : 'Ошибка загрузки файла';
+        throw new ChatClientError($msg);
     }
     $maxBytes = ((int)$cfg['max_file_mb']) * 1024 * 1024;
     if ($file['size'] > $maxBytes) {
-        throw new RuntimeException('Файл больше ' . $cfg['max_file_mb'] . ' МБ');
+        throw new ChatClientError('Файл больше ' . $cfg['max_file_mb'] . ' МБ');
     }
     if (!is_uploaded_file($file['tmp_name'])) {
-        throw new RuntimeException('Некорректная загрузка');
+        throw new ChatClientError('Некорректная загрузка');
     }
     $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
     if (!in_array($ext, $cfg['allowed_ext'], true)) {
-        throw new RuntimeException('Тип файла не разрешён: .' . $ext);
+        throw new ChatClientError('Тип файла не разрешён: .' . $ext);
     }
     $rel = date('Y/m');
     $dir = rtrim($cfg['uploads_dir'], '/') . '/' . $rel;
     if (!is_dir($dir) && !mkdir($dir, 0755, true)) {
-        throw new RuntimeException('Не удалось создать каталог для файлов');
+        throw new ChatClientError('Не удалось создать каталог для файлов');
     }
     $name = date('Ymd_His') . '_' . bin2hex(random_bytes(6)) . '.' . $ext;
     if (!move_uploaded_file($file['tmp_name'], $dir . '/' . $name)) {
-        throw new RuntimeException('Не удалось сохранить файл');
+        throw new ChatClientError('Не удалось сохранить файл');
     }
     $images = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
     return [

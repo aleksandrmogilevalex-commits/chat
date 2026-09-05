@@ -61,10 +61,17 @@ if (class_exists('finfo')) {
 
 $name = $m['file_name'] ?: basename($real);
 $ascii = preg_replace('/[^A-Za-z0-9._-]/', '_', $name) ?: 'file';
+$size = filesize($real);
+if ($size === false) {
+    http_response_code(404);
+    exit;
+}
 
 header('Content-Type: ' . $mime);
-header('Content-Length: ' . (string)filesize($real));
+header('Content-Length: ' . (string)$size);
 header('X-Content-Type-Options: nosniff');
+// Имя файла генерируется один раз и не меняется — можно кэшировать
+header('Cache-Control: private, max-age=86400');
 if ((int)$m['is_image'] === 1 && strpos($mime, 'image/') === 0) {
     header('Content-Disposition: inline; filename="' . $ascii . '"; filename*=UTF-8\'\'' . rawurlencode($name));
 } else {

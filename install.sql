@@ -41,6 +41,23 @@ CREATE TABLE chat_presence (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================
+-- ЕДИНОВРЕМЕННАЯ МИГРАЦИЯ (нужна только если на сайте УЖЕ есть данные
+-- и вы обновляете модуль с версий, где время хранилось в локальном поясе).
+-- Новые версии хранилище ведут в UTC. Строки, записанные старой версией,
+-- нужно сдвинуть назад на ваш старый сдвиг (Киев/Москва зимой — 3 часа,
+-- летом — 2). Запустите ОДИН раз ПЕРЕД разворачиванием новых файлов,
+-- подставляя свой интервал, затем удалите этот блок:
+--
+--   UPDATE chat_messages SET created_at = created_at - INTERVAL 3 HOUR;
+--   UPDATE chat_threads SET created_at = created_at - INTERVAL 3 HOUR,
+--                           updated_at = updated_at - INTERVAL 3 HOUR;
+--   UPDATE chat_participants SET last_read    = last_read    - INTERVAL 3 HOUR,
+--                                typing_until = typing_until - INTERVAL 3 HOUR;
+--   UPDATE chat_presence SET last_seen = last_seen - INTERVAL 3 HOUR;
+--
+-- ============================================================
+
+-- ============================================================
 -- ДЕМО-ДАННЫЕ (только для локального теста; на продакшене удалите)
 -- Замените на таблицу пользователей вашего сайта (см. helpers.php, chat_user_info).
 -- ============================================================

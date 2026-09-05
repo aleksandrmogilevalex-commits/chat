@@ -10,8 +10,8 @@ require __DIR__ . '/helpers.php';
 //   POST ?action=send     (thread_id, body[, file])     — отправить сообщение
 //   POST ?action=start    (recipient_id[, subject])     — найти/создать диалог 1-на-1
 //   POST ?action=typing   (thread_id)                   — «печатает…»
-// Все POST проверяют CSRF (заголовок X-CSRF-Token); отключается
-// в config.php: 'csrf_protection' => false.
+// Все POST проверяют CSRF: заголовок X-CSRF-Token с токеном сессии
+// (см. config.php: 'csrf_protection').
 // ============================================================
 
 $cfg = chat_config();
@@ -211,15 +211,19 @@ try {
             }
             json_out(['error' => 'forbidden'], 403);
         }
-        if ($body === '' && empty($_FILES['file'])) {
+        // «файл есть», только если он реально загружен (пустой input не считается)
+        $hasFile = isset($_FILES['file'])
+            && ($_FILES['file']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE;
+        if ($body === '' && !$hasFile) {
             json_out(['error' => 'empty'], 400);
         }
-        if (mb_strlen($body) > 4000) {
-            $body = mb_substr($body, 0, 4000);
+        if (chat_strlen($body) > 4000) {
+            $body = chat_substr($body, 0, 4000);
         }
 
         $filePath = null; $fileName = null; $fileSize = null; $isImage = 0;
-        if (!empty($_FILES['file'])) {
+        if ($hasFile) {
+            // ошибки валидации файла (ChatClientError) перехватятся ниже -> 400
             [$filePath, $fileName, $fileSize, $isImage] = chat_save_upload($_FILES['file']);
         }
 
@@ -261,6 +265,10 @@ try {
             json_out(['error' => 'unknown_user'], 404);
         }
 
+        // Блокировка от гонки: два одновременных «start» не создадут два диалога
+        $lockName = 'chat_start_' . min($me, $recipient) . '_' . max($me, $recipient);
+        $pdo->prepare('SELECT GET_LOCK(:n, 5)')->execute([':n' => $lockName]);
+
         // существующий диалог ровно с этими двумя участниками (как «личка» в Телеграме)
         $st = $pdo->prepare(
             "SELECT p.thread_id
@@ -276,12 +284,20 @@ try {
         $threadId = $st->fetchColumn();
 
         if (!$threadId) {
-            $pdo->prepare('INSERT INTO chat_threads (subject) VALUES (:s)')
-                ->execute([':s' => $subject !== '' ? mb_substr($subject, 0, 255) : null]);
-            $threadId = (int)$pdo->lastInsertId();
-            $pdo->prepare('INSERT INTO chat_participants (thread_id, user_id) VALUES (:t, :u), (:t2, :u2)')
-                ->execute([':t' => $threadId, ':u' => $me, ':t2' => $threadId, ':u2' => $recipient]);
+            $pdo->beginTransaction();
+            try {
+                $pdo->prepare('INSERT INTO chat_threads (subject) VALUES (:s)')
+                    ->execute([':s' => $subject !== '' ? chat_substr($subject, 0, 255) : null]);
+                $threadId = (int)$pdo->lastInsertId();
+                $pdo->prepare('INSERT INTO chat_participants (thread_id, user_id) VALUES (:t, :u), (:t2, :u2)')
+                    ->execute([':t' => $threadId, ':u' => $me, ':t2' => $threadId, ':u2' => $recipient]);
+                $pdo->commit();
+            } catch (Throwable $e) {
+                $pdo->rollBack();
+                throw $e;
+            }
         }
+        $pdo->prepare('SELECT RELEASE_LOCK(:n)')->execute([':n' => $lockName]);
         json_out(['thread_id' => (int)$threadId]);
     }
 
@@ -304,7 +320,8 @@ try {
     // Ошибка ввода/файла — это не сбой сервера: 400, текст можно показать
     json_out(['error' => $e->getMessage()], 400);
 } catch (Throwable $e) {
-    // Настоящие сбои логируем, но наружу не сливаем (там могут быть детали SQL)
-    error_log('[chat] ' . $e->getMessage() . ' @ ' . ($action ?: '?'));
+    // Текст исключения — в лог сервера; клиенту деталей не раскрываем
+    // (сообщения PDO могут содержать имена таблиц/колонок и параметры запросов).
+    error_log('[chat] ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine() . ' action=' . $action);
     json_out(['error' => 'server'], 500);
 }

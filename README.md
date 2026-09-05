@@ -13,7 +13,7 @@
 ```
 chat/
 ├── chat-page.php   — пример готовой страницы чата
-├── api.php         — JSON-API (sync / send / start / typing / history)
+├── api.php         — JSON-API (sync / send / start / typing / history / csrf)
 ├── file.php        — безопасная отдача вложений (только участникам диалога)
 ├── helpers.php     — БД, авторизация, пользователи
 ├── config.php      — настройки (БД, интеграция, вложения)
@@ -112,7 +112,8 @@ API: `sync` (диалоги + новые сообщения открытого �
 
 ## Требования
 
-PHP ≥ 8.0 (PDO mysql, json, fileinfo — стандартно), MySQL/MariaDB.
+PHP ≥ 8.0 (PDO mysql, json — стандартно; fileinfo и mbstring желательны,
+но без них модуль тоже работает: есть fallback), MySQL/MariaDB.
 Время сообщений хранится в БД в UTC, отображается по часовому поясу браузера.
 Для вложений в `php.ini`: `upload_max_filesize` и `post_max_size`
 на `max_file_mb` + 1 МБ (например, при вложениях до 10 МБ — `12M`).

@@ -79,10 +79,15 @@
   }
 
   /* ---------------- API ---------------- */
+  /** URL file.php рядом с api.php (правильно работает при встраивании на любой странице). */
+  function fileUrl(id) {
+    return state.api.replace(/[^/]*$/, '') + 'file.php?id=' + encodeURIComponent(id);
+  }
+
   /** Низкий уровень: сам fetch, без CSRF. token — для POST. */
   function rawApi(action, params, method, token) {
     var url = state.api + '?action=' + encodeURIComponent(action);
-    var opt = { method: method || 'GET' };
+    var opt = { method: method || 'GET', credentials: 'same-origin' };
     if (opt.method === 'GET') {
       Object.keys(params || {}).forEach(function (k) {
         url += '&' + encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
@@ -358,11 +363,19 @@
       for (var i = 0; i < arr.length; i++) {
         if (arr[i].id === m.id) { arr.splice(i, 1); break; }
       }
-      arr.push(d.message);
+      // поллинг мог успеть получить это же сообщение раньше ответа send — не дублируем
+      if (arr.every(function (x) { return x.id !== d.message.id; })) {
+        arr.push(d.message);
+      }
+      arr.sort(function (a, b) {
+        var an = typeof a.id === 'number', bn = typeof b.id === 'number';
+        if (an && bn) return a.id - b.id;
+        return an ? -1 : (bn ? 1 : 0); // временные (pending) — в конец
+      });
       var maxId = 0;
       arr.forEach(function (x) { if (typeof x.id === 'number' && x.id > maxId) maxId = x.id; });
       state.afterId[tid] = maxId;
-      renderMessages(true);
+      if (tid === state.activeId) renderMessages(true);
     }).catch(function (e) {
       m.pending = false; m.fail = true; m.error = e.message;
       renderMessages();
@@ -377,19 +390,22 @@
   /* ---------------- История вверх ---------------- */
   function loadOlder() {
     if (!state.activeId || state.loadingOlder) return;
-    var arr = state.msgs[state.activeId] || [];
+    var tid = state.activeId; // фиксируем тред: пользователь может переключиться, пока идёт запрос
+    var arr = state.msgs[tid] || [];
     var first = null;
     for (var i = 0; i < arr.length; i++) {
       if (typeof arr[i].id === 'number') { first = arr[i].id; break; }
     }
     if (!first) return;
     state.loadingOlder = true;
-    api('history', { thread_id: state.activeId, before_id: first }).then(function (d) {
+    api('history', { thread_id: tid, before_id: first }).then(function (d) {
       if ((d.messages || []).length) {
-        state.msgs[state.activeId] = d.messages.concat(state.msgs[state.activeId] || []);
-        var sc = state.els.scroll, prev = sc.scrollHeight - sc.scrollTop;
-        renderMessages();
-        sc.scrollTop = sc.scrollHeight - prev; // держим позицию прокрутки
+        state.msgs[tid] = d.messages.concat(state.msgs[tid] || []);
+        if (tid === state.activeId) {
+          var sc = state.els.scroll, prev = sc.scrollHeight - sc.scrollTop;
+          renderMessages();
+          sc.scrollTop = sc.scrollHeight - prev; // держим позицию прокрутки
+        }
       }
       state.loadingOlder = false;
     }).catch(function () { state.loadingOlder = false; });
@@ -468,13 +484,14 @@
       var inner = '';
 
       if (m.has_file) {
-        var canLink = !m.pending && !m.fail; // пока отправляется — ссылка неактивна
+        var canLink = !m.pending && !m.fail && typeof m.id === 'number';
         if (m.is_image && canLink) {
           cls += ' img' + (m.body ? ' has-text' : '');
-          inner += '<img src="file.php?id=' + m.id + '" alt="" loading="lazy">';
+          inner += '<img src="' + esc(fileUrl(m.id)) + '" alt="" loading="lazy">';
         } else {
+          // пока сообщение не сохранено на сервере (pending/fail) — ссылки ещё нет
           var nameHtml = canLink
-            ? '<a class="tg-file-name" href="file.php?id=' + m.id + '" download>' + esc(m.file_name || 'файл') + '</a>'
+            ? '<a class="tg-file-name" href="' + esc(fileUrl(m.id)) + '" download>' + esc(m.file_name || 'файл') + '</a>'
             : '<span class="tg-file-name">' + esc(m.file_name || 'файл') + '</span>';
           inner += '<div class="tg-file">'
             + '<div class="tg-file-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M5 2a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8l-6-6H5zm8 1.5L19.5 10H13V3.5zM7 12h10v2H7v-2zm0 4h7v2H7v-2z"/></svg></div>'

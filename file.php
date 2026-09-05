@@ -37,7 +37,10 @@ $base = rtrim(chat_config()['uploads_dir'], '/');
 $path = $base . '/' . $m['file_path'];
 $real = realpath($path);
 $baseReal = realpath($base);
-if ($real === false || $baseReal === false || strpos($real, $baseReal) !== 0) {
+// Сравниваем с разделителем на конце, чтобы каталог-сосед вида
+// /path/uploads_chat_evil не прошёл проверку префикса /path/uploads_chat
+if ($real === false || $baseReal === false
+    || strpos($real, rtrim($baseReal, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR) !== 0) {
     http_response_code(404);
     exit;
 }
@@ -70,7 +73,7 @@ if ($size === false) {
 header('Content-Type: ' . $mime);
 header('Content-Length: ' . (string)$size);
 header('X-Content-Type-Options: nosniff');
-// Имя файла генерируется один раз и не меняется — можно кэшировать
+// Файл приватный (кэш только в браузере участника), имя неизменяемое — можно кэшировать дольше
 header('Cache-Control: private, max-age=86400');
 if ((int)$m['is_image'] === 1 && strpos($mime, 'image/') === 0) {
     header('Content-Disposition: inline; filename="' . $ascii . '"; filename*=UTF-8\'\'' . rawurlencode($name));
